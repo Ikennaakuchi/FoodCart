@@ -6,17 +6,20 @@ import org.food.ordering.system.domain.valueobject.Money;
 import org.food.ordering.system.domain.valueobject.OrderId;
 import org.food.ordering.system.domain.valueobject.OrderStatus;
 import org.food.ordering.system.domain.valueobject.RestaurantId;
+import org.food.ordering.system.order.service.domain.exception.OrderDomainException;
+import org.food.ordering.system.order.service.domain.valueobject.OrderItemId;
 import org.food.ordering.system.order.service.domain.valueobject.StreetAddress;
 import org.food.ordering.system.order.service.domain.valueobject.TrackingId;
 
 import java.util.List;
+import java.util.UUID;
 
 public class Order extends AggregateRoot<OrderId> {
     private final CustomerId customerId;
     private final RestaurantId restaurantId;
     private final StreetAddress deliveryAddress;
     private final Money price;
-    private final List<OrderItems> items;
+    private final List<OrderItem> items;
     private TrackingId trackingId;
     private OrderStatus orderStatus;
     private List<String> failureMessages;
@@ -50,7 +53,7 @@ public class Order extends AggregateRoot<OrderId> {
         return price;
     }
 
-    public List<OrderItems> getItems() {
+    public List<OrderItem> getItems() {
         return items;
     }
 
@@ -72,7 +75,7 @@ public class Order extends AggregateRoot<OrderId> {
         private RestaurantId restaurantId;
         private StreetAddress deliveryAddress;
         private Money price;
-        private List<OrderItems> items;
+        private List<OrderItem> items;
         private TrackingId trackingId;
         private OrderStatus orderStatus;
         private List<String> failureMessages;
@@ -109,7 +112,7 @@ public class Order extends AggregateRoot<OrderId> {
             return this;
         }
 
-        public Builder items(List<OrderItems> val) {
+        public Builder items(List<OrderItem> val) {
             items = val;
             return this;
         }
@@ -131,6 +134,57 @@ public class Order extends AggregateRoot<OrderId> {
 
         public Order build() {
             return new Order(this);
+        }
+    }
+
+    public void validateOrder(){
+        validateInitialOrder();
+        validateTotalPrice();
+        validateItemPrice();
+    }
+
+    private void validateInitialOrder() {
+        if (orderStatus != null || getId() != null){
+            throw new OrderDomainException("Order is not in an appropriate state for initialization");
+        }
+    }
+
+    private void validateTotalPrice() {
+        if (price == null || !price.isGreaterThanZero()){
+            throw new OrderDomainException("Total price must be greater than zero");
+        }
+    }
+
+    private void validateItemPrice() {
+        Money orderItemsTotal = items.stream().map(orderItem -> {
+            validateItemPrice(orderItem);
+            return orderItem.getSubTotal();
+        }).reduce(Money.ZERO, Money::add);
+
+        if(!price.equals(orderItemsTotal)){
+            throw new OrderDomainException("Total price: " + price.getAmount()
+            + " is not equal to Order items total: "+ orderItemsTotal.getAmount());
+        }
+    }
+
+    private void validateItemPrice(OrderItem orderItem){
+        if (!orderItem.isPriceValid()){
+            throw new OrderDomainException("order item price: "+ orderItem.getPrice().getAmount() +
+                    " is not valid for the product : "+ orderItem.getProduct().getId().getValue());
+        }
+    }
+
+    public void initializeOrder(){
+        setId(new OrderId(UUID.randomUUID()));
+        trackingId = new TrackingId(UUID.randomUUID());
+        orderStatus = OrderStatus.PENDING;
+        initializeOrderItems();
+    }
+
+    private void initializeOrderItems() {
+        long itemId = 1;
+        for (OrderItem orderItem : items){
+            orderItem.initializeOrderItem(super.getId(), new OrderItemId(itemId++));
         }
     }
 }
